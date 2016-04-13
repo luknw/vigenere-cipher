@@ -22,14 +22,15 @@ str_usage			db 'vigciph [-d] INPUT OUTPUT KEY',13d,10d
 
 err_overflow		db 'error: arguments too long',13d,10d,13d,10d,'$'
 err_arg_count		db 'error: invalid number of arguments',13d,10d,13d,10d,'$'
-err_unknown_option	db 'error: unknown option',13d,10d,13d,10d,'$'
+err_unknown_option	db 'error: invalid option',13d,10d,13d,10d,'$'
 err_key_value		db 'error: invalid key value',13d,10d,13d,10d,'$'
+err_file			db 'error: invalid file operation',13d,10d,13d,10d,'$'
 
-;debug
-decode				db 0d,'0$'
-input_file			db 10d dup(0d),'1$'
-output_file			db 10d dup(0d),'2$'
-key					db 10d dup(0d),'3$'
+
+decode				db 0d
+input_file			db 128d dup(0d)
+output_file			db 128d dup(0d)
+key					db 128d dup(0d)
 
 data ends
 
@@ -176,17 +177,6 @@ endm
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-
-
-
-
-
-
-
-
-
-
-
 code segment
 
 debug macro CHAR
@@ -278,6 +268,7 @@ print_str_usage:
 	int 21h
 $error_exit endp
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 ;eat_whitespace
 ;Returns position of the first non-whitespace char in the string
@@ -561,6 +552,77 @@ check_key:
 verify_args endp
 
 
+;open_files
+;Returns handles to input/output files.
+;	si - input file
+;	di - output file
+;
+open_files proc
+	push ax
+	push cx
+	push dx
+	push ds
+	
+	LD_STO_SEG ds
+
+	mov ax,3d00h				;open input file
+	mov dx,offset input_file
+	int 21h
+	jc file_error
+
+	mov si,ax
+
+	mov ah,3ch					;create tmp output file
+	mov dx,offset output_file
+	xor cx,cx
+	int 21h
+	jc file_error
+
+	mov di,ax
+
+	pop ds
+	pop dx
+	pop cx
+	pop ax
+	ret
+
+	file_error:
+	ERROR_EXIT_STR -5d, err_file
+open_files endp
+
+
+;close_files
+;Performs cleanup of input/output files.
+;
+;Arguments:		si - input file
+;				di - output file
+;
+close_files proc
+	push ax
+	push bx
+	push dx
+	push ds
+
+	LD_STO_SEG ds
+
+	mov ah,3eh					;close input file
+	mov bx,si
+	int 21h
+	jc file_error
+
+	mov bx,di					;close output file
+	int 21h
+	jc file_error
+
+	pop ds
+	pop dx
+	pop bx
+	pop ax
+	ret
+
+	file_error:
+	ERROR_EXIT_STR -5d, err_file
+close_files endp
 
 
 
@@ -575,9 +637,16 @@ main:
 
 	call verify_args
 
+	call open_files
+
+	;call encrypt
+
+	call close_files
+
 	mov ax,4c00h
 	int 21h
 code ends
+
 
 stack segment stack
 
