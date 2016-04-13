@@ -28,9 +28,17 @@ err_file			db 'error: invalid file operation',13d,10d,13d,10d,'$'
 
 
 decode				db 0d
-input_file			db 128d dup(0d)
-output_file			db 128d dup(0d)
+input_name			db 128d dup(0d)
+output_name			db 128d dup(0d)
 key					db 128d dup(0d)
+
+
+input_handle		dw ?
+output_handle		dw ?
+
+
+BUFFER_SIZE			= 1024d
+buffer				db BUFFER_SIZE dup(?)
 
 data ends
 
@@ -206,23 +214,6 @@ LSTR macro NAME
 	mov ds,ax
 	mov dx,offset NAME
 
-	pop ax
-endm
-
-
-;ENDL
-;Prints cr lf.
-ENDL macro
-	push ax
-	push dx
-
-	mov ah,02h
-	mov dl,0dh
-	int 21h
-	mov dl,0ah
-	int 21h
-
-	pop dx
 	pop ax
 endm
 
@@ -452,7 +443,7 @@ verify_key proc
 	push si
 
 	ARGLEN dx, si				;check size of argument with index dx
-	test si,si					;if it's 0 (argument doesn't provided)
+	test si,si					;if it's 0 (argument isn't provided)
 	jz cleanup					;leave default, jump to cleanup
 
 	ARG dx, si					;point si at an argument with index dx
@@ -536,10 +527,10 @@ check_decode:
 	inc dx
 
 copy_input:
-	COPY_ARG dx, seg input_file, offset input_file
+	COPY_ARG dx, seg input_name, offset input_name
 	inc dx
 
-	COPY_ARG dx, seg output_file, offset output_file
+	COPY_ARG dx, seg output_name, offset output_name
 	inc dx
 
 check_key:
@@ -552,11 +543,14 @@ check_key:
 verify_args endp
 
 
-;open_files
-;Returns handles to input/output files.
-;	si - input file
-;	di - output file
-;
+CHECK_FILE_ERROR proc
+	jnc no_error
+	ERROR_EXIT_STR -5d, err_file
+no_error:
+	ret
+CHECK_FILE_ERROR endp
+
+
 open_files proc
 	push ax
 	push cx
@@ -566,66 +560,152 @@ open_files proc
 	LD_STO_SEG ds
 
 	mov ax,3d00h				;open input file
-	mov dx,offset input_file
+	mov dx,offset input_name
 	int 21h
-	jc file_error
+	call CHECK_FILE_ERROR
 
-	mov si,ax
+	mov ds:[input_handle],ax
 
 	mov ah,3ch					;create tmp output file
-	mov dx,offset output_file
+	mov dx,offset output_name
 	xor cx,cx
 	int 21h
-	jc file_error
+	call CHECK_FILE_ERROR
 
-	mov di,ax
+	mov ds:[output_handle],ax
 
 	pop ds
 	pop dx
 	pop cx
 	pop ax
 	ret
-
-	file_error:
-	ERROR_EXIT_STR -5d, err_file
 open_files endp
 
 
-;close_files
-;Performs cleanup of input/output files.
-;
-;Arguments:		si - input file
-;				di - output file
-;
 close_files proc
 	push ax
 	push bx
-	push dx
 	push ds
 
 	LD_STO_SEG ds
 
 	mov ah,3eh					;close input file
-	mov bx,si
+	mov bx,ds:[input_handle]
 	int 21h
-	jc file_error
+	call CHECK_FILE_ERROR
 
-	mov bx,di					;close output file
+	mov bx,ds:[output_handle]	;close output file
 	int 21h
-	jc file_error
+	call CHECK_FILE_ERROR
 
 	pop ds
+	pop bx
+	pop ax
+	ret
+close_files endp
+
+
+;load_buffer
+;Returns number of bytes read in cx.
+;
+load_buffer proc
+	push ax
+	push bx
+	push dx
+	
+	mov ah,3fh
+	mov bx,ds:[input_handle]
+	mov cx,BUFFER_SIZE
+	mov dx,offset buffer
+	int 21h
+	call CHECK_FILE_ERROR
+	mov cx,ax
+
 	pop dx
 	pop bx
 	pop ax
 	ret
+load_buffer endp
 
-	file_error:
+
+save_buffer proc
+	push ax
+	push bx
+	push dx
+	
+	mov ah,40h
+	mov bx,ds:[output_handle]
+	mov dx,offset buffer
+	int 21h
+	call CHECK_FILE_ERROR
+	cmp cx,ax
+	je no_error
 	ERROR_EXIT_STR -5d, err_file
-close_files endp
+
+no_error:
+	pop dx
+	pop bx
+	pop ax
+	ret
+save_buffer endp
 
 
+encrypt proc
+	push ax
+	push bx
+	push cx
+	push dx
+	push si
+	push ds
+	
+	LD_STO_SEG ds
 
+	cmp ds:[decode],1d
+	jne init_encryption
+
+	mov bx,offset key
+invert_char:
+	neg byte ptr ds:[bx]
+	inc bx
+	cmp byte ptr ds:[bx],0d
+	jne invert_char
+
+init_encryption:
+	mov bx,offset key
+
+ld_buffer:
+	call load_buffer
+	mov si,offset buffer
+	mov dx,cx					;save number of bytes read
+
+encrypt_char:
+	mov al,ds:[si]
+	add al,ds:[bx]
+
+	inc bx
+	cmp byte ptr ds:[bx],0d
+	jne key_not_reset
+	mov bx,offset key
+
+key_not_reset:
+	mov ds:[si],al
+	inc si
+	loop encrypt_char
+
+	mov cx,dx
+	call save_buffer
+
+	cmp cx,BUFFER_SIZE
+	je ld_buffer
+
+	pop ds
+	pop si
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	ret
+encrypt endp
 
 
 main:
@@ -639,7 +719,7 @@ main:
 
 	call open_files
 
-	;call encrypt
+	call encrypt
 
 	call close_files
 
