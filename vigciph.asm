@@ -186,21 +186,6 @@ endm
 
 
 code segment
-
-debug macro CHAR
-	push ax
-	push dx
-
-	mov ah,02h
-	mov dl,CHAR
-	int 21h
-
-	mov ah,00h
-	int 16h
-
-	pop dx
-	pop ax
-endm
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;LSTR
 ;Load address of string NAME to ds:dx
@@ -543,12 +528,12 @@ check_key:
 verify_args endp
 
 
-CHECK_FILE_ERROR proc
+check_file_error proc
 	jnc no_error
 	ERROR_EXIT_STR -5d, err_file
 no_error:
 	ret
-CHECK_FILE_ERROR endp
+check_file_error endp
 
 
 open_files proc
@@ -559,10 +544,10 @@ open_files proc
 	
 	LD_STO_SEG ds
 
-	mov ax,3d00h				;open input file
+	mov ax,3d00h				;open input file for reading
 	mov dx,offset input_name
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 
 	mov ds:[input_handle],ax
 
@@ -570,7 +555,7 @@ open_files proc
 	mov dx,offset output_name
 	xor cx,cx
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 
 	mov ds:[output_handle],ax
 
@@ -592,11 +577,11 @@ close_files proc
 	mov ah,3eh					;close input file
 	mov bx,ds:[input_handle]
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 
 	mov bx,ds:[output_handle]	;close output file
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 
 	pop ds
 	pop bx
@@ -618,7 +603,7 @@ load_buffer proc
 	mov cx,BUFFER_SIZE
 	mov dx,offset buffer
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 	mov cx,ax
 
 	pop dx
@@ -628,7 +613,7 @@ load_buffer proc
 load_buffer endp
 
 
-save_buffer proc
+save_buffer proc				;numbers of bytes to write in cx
 	push ax
 	push bx
 	push dx
@@ -637,7 +622,7 @@ save_buffer proc
 	mov bx,ds:[output_handle]
 	mov dx,offset buffer
 	int 21h
-	call CHECK_FILE_ERROR
+	call check_file_error
 	cmp cx,ax
 	je no_error
 	ERROR_EXIT_STR -5d, err_file
@@ -665,7 +650,7 @@ encrypt proc
 
 	mov bx,offset key
 invert_char:
-	neg byte ptr ds:[bx]
+	neg byte ptr ds:[bx]		;ds:[bx] = 256 - ds:[bx]; two's complement negation
 	inc bx
 	cmp byte ptr ds:[bx],0d
 	jne invert_char
@@ -680,7 +665,7 @@ ld_buffer:
 
 encrypt_char:
 	mov al,ds:[si]
-	add al,ds:[bx]
+	add al,byte ptr ds:[bx]
 
 	inc bx
 	cmp byte ptr ds:[bx],0d
@@ -718,7 +703,7 @@ main:
 	call verify_args
 
 	call open_files
-
+	
 	call encrypt
 
 	call close_files
